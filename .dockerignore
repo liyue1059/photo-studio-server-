@@ -1,0 +1,14 @@
+node_modules
+npm-debug.log
+.git
+.gitignore
+.env
+# 本地写盘的旧产物，不进镜像
+public/ai-generated
+# 与 Cloudflare 隧道相关的本地调试文件，不进镜像
+cloudflared.exe
+cf.log
+# 测试与本地开发依赖
+__tests__
+*.test.js
+nodemon.json
