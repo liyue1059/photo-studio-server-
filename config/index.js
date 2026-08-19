@@ -3,7 +3,9 @@ require('dotenv').config();
 const isProd = (process.env.NODE_ENV || 'development') === 'production';
 
 const config = {
-  port: process.env.PORT || 3000,
+  // CloudBase 容器默认注入 PORT=3000，但健康探针默认探 80，统一改为 80。
+  // 本地开发保留 PORT=3000（或任意自定义）只需在 .env 里手写 PORT=3000。
+  port: process.env.PORT || (isProd ? 80 : 3000),
   env: process.env.NODE_ENV || 'development',
 
   db: {
