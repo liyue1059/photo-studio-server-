@@ -19,6 +19,15 @@ const aiRoutes = require('./routes/ai');
 
 const app = express();
 
+// CloudBase 容器前置网关（CLB / API 网关）会注入
+//   X-Forwarded-For: <client_ip>, <internal_ip>
+// 多 IP 形式。express-rate-limit 默认只期望单个 IP，看到逗号分隔会抛
+// ERR_ERL_UNEXPECTED_X_FORWARDED_FOR（fail-fast），结果每个进站请求都会
+// 触发 500，导致前端报"需要重新登录"。
+// CloudBase 是受控环境：trust proxy 全开是安全的——Express 会取 X-Forwarded-For
+// 链的第一个 IP 作为 req.ip（真实客户端 IP），rate-limit 用它做 key 就稳了。
+app.set('trust proxy', true);
+
 // Security
 // 注意：crossOriginResourcePolicy 必须设为 'cross-origin'（或关闭），
 // 否则微信小程序（运行在 servicewechat.com）跨域请求会被拦截返回 502。
