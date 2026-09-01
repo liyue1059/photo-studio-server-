@@ -64,6 +64,17 @@ const aiLimiter = rateLimit({
 });
 app.use('/api/ai/generate', aiLimiter);
 
+// 老照片修复同样走付费的豆包 img2img（且单次耗时可达数十秒），
+// 限流比普通接口更严：每分钟每 IP 最多 5 次提交，防止被刷爆账单。
+const repairLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { code: 429, message: '修复请求过于频繁，请稍后再试' }
+});
+app.use('/api/repair/submit', repairLimiter);
+
 // Body parsing
 // verify 回调会把原始请求体存到 req.rawBody，供微信支付回调验签使用（签名必须基于原始字节）
 app.use(express.json({
@@ -75,8 +86,26 @@ app.use(express.json({
 app.use(express.urlencoded({ extended: true }));
 
 // Health check
+// 附带各关键配置的「就绪状态」。只报布尔值与长度指纹，绝不返回任何密钥字符——
+// 该端点无鉴权且暴露在公网，泄露哪怕片段也不可接受；长度指纹已足够判断
+// 「环境变量有没有注入」「注入的是不是期望那把 key」（火山方舟 key 长度固定）。
 app.get('/health', (req, res) => {
-  res.json({ status: 'ok', time: new Date().toISOString() });
+  const len = (v) => (v ? v.length : 0);
+  res.json({
+    status: 'ok',
+    time: new Date().toISOString(),
+    env: config.env,
+    ready: {
+      doubaoApiKey: !!config.doubao.apiKey,
+      doubaoKeyLen: len(config.doubao.apiKey),
+      doubaoModel: config.doubao.model,
+      wxAppId: !!config.wechat.appId,
+      wxPay: config.wxpay.enabled,
+      cos: !!(config.cos.secretId && config.cos.secretKey && config.cos.bucket),
+      dbName: config.db.database,
+      jwtSecret: !!process.env.JWT_SECRET
+    }
+  });
 });
 
 // API Routes

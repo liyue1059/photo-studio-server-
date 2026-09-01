@@ -1,4 +1,5 @@
 const express = require('express');
+const config = require('../config');
 const { optionalAuth } = require('../middleware/auth');
 const doubao = require('../services/doubao-image');
 
