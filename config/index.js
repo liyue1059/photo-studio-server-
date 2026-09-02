@@ -90,6 +90,13 @@ const config = {
     quarter: 4390,      // ¥43.9 包季（3 个月）
     halfYear: 7490,     // ¥74.9 包半年（6 个月）
     yearly: 11990       // ¥119.9 包年（12 个月）
+  },
+
+  // 会员权益：新用户免费试用次数。
+  // 与 miniprogram/config/brand.js 的 `freeTrials` 保持一致（品牌侧是展示用常量，
+  // 这里是服务端真正消费的唯一真相源）。改数量只需改这一处 + brand.js 同步。
+  membership: {
+    freeTrials: parseInt(process.env.FREE_TRIALS || '2', 10)
   }
 };
 
