@@ -1,5 +1,7 @@
 node_modules
 .env
+# 临时排障脚本（形如 _diag_db.js），用完即弃，不进仓库
+_diag_*.js
 npm-debug.log
 public/ai-generated
 cloudflared.exe
