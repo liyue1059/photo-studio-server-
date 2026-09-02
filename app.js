@@ -27,8 +27,15 @@ const app = express();
 // 多 IP 形式。express-rate-limit 默认只期望单个 IP，看到逗号分隔会抛
 // ERR_ERL_UNEXPECTED_X_FORWARDED_FOR（fail-fast），结果每个进站请求都会
 // 触发 500，导致前端报"需要重新登录"。
+//
 // CloudBase 是受控环境：trust proxy 全开是安全的——Express 会取 X-Forwarded-For
 // 链的第一个 IP 作为 req.ip（真实客户端 IP），rate-limit 用它做 key 就稳了。
+//
+// ⚠️ express-rate-limit@7.x 新增了 ERR_ERL_PERMISSIVE_TRUST_PROXY 校验——
+// 它认为 `true` 太宽松（允许任何人伪造 XFF 头绕过 IP 限流）。
+// 在两个 rateLimit 实例里通过 `validate: { trustProxy: false }` 显式 opt-out，
+// 表明我们清楚 CloudBase 网关是受信任的（容器网络隔离、攻击者无法伪造 XFF）。
+// 其它校验（xForwardedForHeader 等）仍然开启。
 app.set('trust proxy', true);
 
 // Security
@@ -53,6 +60,9 @@ const limiter = rateLimit({
   legacyHeaders: false,
   // 微信支付回调是微信服务器公开调用，重试高峰可能触发 429 导致丢回调，跳过限流
   skip: (req) => req.originalUrl.startsWith('/api/pay/callback'),
+  // trust proxy=true 与 express-rate-limit@7.x 的 ERR_ERL_PERMISSIVE_TRUST_PROXY 校验相冲突；
+  // 此处显式 opt-out 该校验，理由见上方 trust proxy 注释（CloudBase 受控环境，XFF 来自受信网关）
+  validate: { trustProxy: false },
   message: { code: 429, message: '请求过于频繁，请稍后再试' }
 });
 app.use('/api/', limiter);
@@ -63,6 +73,7 @@ const aiLimiter = rateLimit({
   max: 8,
   standardHeaders: true,
   legacyHeaders: false,
+  validate: { trustProxy: false },
   message: { code: 429, message: 'AI 生成请求过于频繁，请稍后再试' }
 });
 app.use('/api/ai/generate', aiLimiter);
@@ -74,6 +85,7 @@ const repairLimiter = rateLimit({
   max: 5,
   standardHeaders: true,
   legacyHeaders: false,
+  validate: { trustProxy: false },
   message: { code: 429, message: '修复请求过于频繁，请稍后再试' }
 });
 app.use('/api/repair/submit', repairLimiter);
