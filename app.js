@@ -17,6 +17,9 @@ const uploadRoutes = require('./routes/upload');
 const payRoutes = require('./routes/pay');
 const aiRoutes = require('./routes/ai');
 
+// 全局错误处理器（单独成模块，便于直接单元测试；见 middleware/error-handler.js）
+const errorHandler = require('./middleware/error-handler');
+
 const app = express();
 
 // CloudBase 容器前置网关（CLB / API 网关）会注入
@@ -130,13 +133,9 @@ app.use((req, res) => {
 });
 
 // Error handler
-app.use((err, req, res, next) => {
-  console.error('Unhandled error:', err);
-  res.status(500).json({
-    code: 500,
-    message: config.env === 'production' ? 'Internal server error' : err.message
-  });
-});
+// 抽到 middleware/error-handler.js：请求体解析失败（entity.parse.failed）要降级为 400，
+// 不能当服务器崩溃报 500。逻辑与单测见该模块。
+app.use(errorHandler);
 
 app.listen(config.port, () => {
   console.log(`Server running on port ${config.port} [${config.env}]`);
