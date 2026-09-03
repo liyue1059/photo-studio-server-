@@ -5,6 +5,7 @@ const config = require('../config');
 const redis = require('../utils/redis');
 const { authMiddleware } = require('../middleware/auth');
 const doubao = require('../services/doubao-image');
+const { toAbsoluteUrl } = require('../utils/url');
 
 const router = express.Router();
 router.use(authMiddleware);
@@ -181,7 +182,9 @@ router.get('/status', async (req, res) => {
       code: 0,
       data: {
         status: task.status,
-        resultUrl: task.resultUrl || null,
+        // 未配置 COS 时结果图是本服务静态目录的相对路径，必须拼绝对地址，
+        // 否则小程序拿去下载/展示会失败（<image> 不认相对路径）。
+        resultUrl: toAbsoluteUrl(task.resultUrl || null, req),
         error: task.error || null,
         model: task.model || null,
         costUsd: task.costUsd || null

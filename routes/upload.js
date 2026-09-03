@@ -3,6 +3,7 @@ const multer = require('multer');
 const path = require('path');
 const { authMiddleware } = require('../middleware/auth');
 const { uploadImage } = require('../utils/cloud-storage');
+const { toAbsoluteUrl } = require('../utils/url');
 
 const router = express.Router();
 router.use(authMiddleware);
@@ -26,7 +27,8 @@ router.post('/image', upload.single('file'), async (req, res) => {
 
     const ext = (path.extname(req.file.originalname) || '.jpg').replace(/^\./, '');
     // 上传到云存储（COS）；未配置时回退本地磁盘，返回真实可访问 URL
-    const url = await uploadImage(req.file.buffer, ext, 'uploads');
+    // 同上：未配置 COS 时 url 是相对路径，出参必须规范化成绝对地址
+    const url = toAbsoluteUrl(await uploadImage(req.file.buffer, ext, 'uploads'), req);
 
     res.json({
       code: 0,

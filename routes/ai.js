@@ -2,6 +2,7 @@ const express = require('express');
 const config = require('../config');
 const { optionalAuth } = require('../middleware/auth');
 const doubao = require('../services/doubao-image');
+const { toAbsoluteUrls } = require('../utils/url');
 
 const router = express.Router();
 router.use(optionalAuth);
@@ -13,7 +14,9 @@ router.use(optionalAuth);
  *         传入时执行图生图（img2img）：基于该参考图 + prompt 生成新图。
  *         不传时退化为纯文生图。
  *   aspectRatio — 可选，原图宽高比（如 "3:4"）。图生图时用于保持原图比例，避免被裁切为 1:1。
- * Returns: { code:0, data:{ prompt, images:[local paths], model, costUsd }, message }
+ * Returns: { code:0, data:{ prompt, images:[绝对 URL], model, costUsd }, message }
+ *   images 一律是绝对 https URL（未配置 COS 时由 utils/url.js 把本地相对路径补全），
+ *   禁止返回 /ai-generated/xxx.png 这类相对路径——小程序 <image> 会静默白图。
  */
 router.post('/generate', async (req, res) => {
   try {
@@ -72,11 +75,15 @@ router.post('/generate', async (req, res) => {
       }
     }
 
+    // 未配置 COS 时 cloud-storage 回退本地磁盘，返回的是 /ai-generated/xxx.png 相对路径。
+    // 小程序 <image src> 不认相对路径 → 静默白图，故出参一律规范化成绝对 URL。
+    const images = toAbsoluteUrls(result.images, req);
+
     res.json({
       code: 0,
       data: {
         prompt,
-        images: result.images,
+        images,
         model: result.model,
         costUsd: result.costUsd
       },
