@@ -97,6 +97,12 @@ const config = {
   // 这里是服务端真正消费的唯一真相源）。改数量只需改这一处 + brand.js 同步。
   membership: {
     freeTrials: parseInt(process.env.FREE_TRIALS || '2', 10)
+  },
+
+  // 激励视频广告（看广告换免费额度）
+  // dailyCap：单用户每日最多可领取次数，防刷。可通过 AD_DAILY_CAP 调整。
+  ad: {
+    dailyCap: parseInt(process.env.AD_DAILY_CAP || '5', 10)
   }
 };
 

@@ -6,6 +6,7 @@ const redis = require('../utils/redis');
 const { authMiddleware } = require('../middleware/auth');
 const doubao = require('../services/doubao-image');
 const { toAbsoluteUrl } = require('../utils/url');
+const { checkQuota, decrementQuota } = require('../utils/membership');
 
 const router = express.Router();
 router.use(authMiddleware);
@@ -91,6 +92,13 @@ async function processRepair(taskId, userId, image, imageUrl, options) {
       throw new Error('AI 未返回修复结果');
     }
 
+    // 修复成功 → 扣减 1 次免费额度；独立 try 避免扣减异常把「已成功」任务误标失败
+    try {
+      await decrementQuota(userId);
+    } catch (e) {
+      console.error('[Repair] 扣减额度失败（任务已成功）:', e && e.message);
+    }
+
     await redis.set(
       'repair:' + taskId,
       Object.assign({}, baseTask, {
@@ -130,6 +138,16 @@ router.post('/submit', async (req, res) => {
 
     if (!image && !imageUrl) {
       return res.status(400).json({ code: 400, message: 'image 或 imageUrl 至少提供一个' });
+    }
+
+    // 免费额度校验：额度耗尽时拦截（会员不受影响）。扣减在 AI 修复成功后进行。
+    const q = await checkQuota(req.userId);
+    if (q === 'exhausted') {
+      return res.json({
+        code: 1,
+        message: '免费额度已用完，看广告或开通会员后继续使用',
+        data: { needQuota: true }
+      });
     }
 
     const taskId = crypto.randomUUID();

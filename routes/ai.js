@@ -3,6 +3,7 @@ const config = require('../config');
 const { optionalAuth } = require('../middleware/auth');
 const doubao = require('../services/doubao-image');
 const { toAbsoluteUrls } = require('../utils/url');
+const { checkQuota, decrementQuota } = require('../utils/membership');
 
 const router = express.Router();
 router.use(optionalAuth);
@@ -58,6 +59,19 @@ router.post('/generate', async (req, res) => {
       imageRatio: body.imageRatio || null
     };
 
+    // 免费额度校验：登录用户且额度耗尽时拦截（会员不受影响）。
+    // 仅校验不扣减；扣减在 AI 生成成功后进行，避免上游失败误扣免费次数。
+    if (req.userId) {
+      const q = await checkQuota(req.userId);
+      if (q === 'exhausted') {
+        return res.json({
+          code: 1,
+          message: '免费额度已用完，看广告或开通会员后继续使用',
+          data: { needQuota: true }
+        });
+      }
+    }
+
     // 带重试的调用：如果因尺寸参数失败，降级为默认尺寸重试一次
     let result;
     try {
@@ -78,6 +92,11 @@ router.post('/generate', async (req, res) => {
     // 未配置 COS 时 cloud-storage 回退本地磁盘，返回的是 /ai-generated/xxx.png 相对路径。
     // 小程序 <image src> 不认相对路径 → 静默白图，故出参一律规范化成绝对 URL。
     const images = toAbsoluteUrls(result.images, req);
+
+    // 生成成功 → 扣减 1 次免费额度（会员不受影响；守卫保证不会扣成负数）
+    if (req.userId) {
+      await decrementQuota(req.userId);
+    }
 
     res.json({
       code: 0,

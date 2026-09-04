@@ -52,4 +52,40 @@ async function applyMembership(userId, payType, conn = null) {
   await redis.del('membership:' + userId);
 }
 
-module.exports = { applyMembership, DURATIONS };
+/**
+ * 校验用户当前是否有可用免费额度（用于生成/修复前拦截）。
+ * @returns {Promise<'ok'|'vip'|'exhausted'>}
+ *   ok       — single 试用行且 remain_count > 0，可消耗
+ *   vip      — 会员（plan_type !== 'single'），无需消耗
+ *   exhausted— 无 single 行或 remain_count <= 0，额度已用完
+ */
+async function checkQuota(userId) {
+  const rows = await db.query(
+    "SELECT plan_type, remain_count FROM memberships WHERE user_id = ? AND status = 1 ORDER BY id DESC LIMIT 1",
+    [userId]
+  );
+  if (rows.length === 0) return 'exhausted';
+  if (rows[0].plan_type !== 'single') return 'vip';
+  if (rows[0].remain_count > 0) return 'ok';
+  return 'exhausted';
+}
+
+/**
+ * 实际扣减 1 次免费额度（仅在生成/修复成功时调用）。
+ * 原子 UPDATE + `remain_count > 0` 守卫，保证不会扣成负数；
+ * 会员（plan_type !== 'single'）行不受影响。
+ * @returns {Promise<boolean>} 是否成功扣减（false 表示本就不是 single 行或已无额度）
+ */
+async function decrementQuota(userId) {
+  const res = await db.query(
+    "UPDATE memberships SET remain_count = remain_count - 1 WHERE user_id = ? AND plan_type = 'single' AND status = 1 AND remain_count > 0",
+    [userId]
+  );
+  if (res.affectedRows > 0) {
+    await redis.del('membership:' + userId);
+    return true;
+  }
+  return false;
+}
+
+module.exports = { applyMembership, checkQuota, decrementQuota, DURATIONS };

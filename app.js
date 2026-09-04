@@ -16,6 +16,7 @@ const membershipRoutes = require('./routes/membership');
 const uploadRoutes = require('./routes/upload');
 const payRoutes = require('./routes/pay');
 const aiRoutes = require('./routes/ai');
+const adRoutes = require('./routes/ad');
 
 // 全局错误处理器（单独成模块，便于直接单元测试；见 middleware/error-handler.js）
 const errorHandler = require('./middleware/error-handler');
@@ -133,6 +134,7 @@ app.use('/api/membership', membershipRoutes);
 app.use('/api/upload', uploadRoutes);
 app.use('/api/pay', payRoutes);
 app.use('/api/ai', aiRoutes);
+app.use('/api/ad', adRoutes);
 
 // Static files (AI generated images, uploads, etc.)
 const PUBLIC_DIR = path.join(__dirname, 'public');
