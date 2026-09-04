@@ -77,6 +77,18 @@ const config = {
   doubao: {
     apiKey: process.env.DOUBAO_API_KEY || '',
     model: process.env.DOUBAO_MODEL || 'doubao-seedream-4-0-250828',
+    // 老照片修复专用模型。
+    // 选型实测（2026-09-04）：
+    //   - seedream 4.0 img2img：重绘强度极低，划痕被当场景内容原样保留，
+    //     换 5 组提示词（含中英文/强指令/负向）均无效 → 不可用。
+    //   - seededit 3.0：本账号方舟模型广场未上架，调用 404 → 不可用。
+    //   - seedream 5.0-lite：指令遵循显著更强，是本账号可用模型里单价最低的
+    //     （lite 档），实测修复耗时 ~32s、输出 2K 图，划痕能被真正重绘掉 → 采用。
+    editModel: process.env.DOUBAO_EDIT_MODEL || 'doubao-seedream-5-0-lite-260128',
+    // 修复模式输出尺寸。seedream 5.0 系列不接受 seedream 4.0 的
+    // 1024x1024 一类「1K」像素尺寸（会 400 InvalidParameter），
+    // 只接受 '2K' / '3K'。修复场景固定 2K：够清晰且成本最低。
+    editSize: process.env.DOUBAO_EDIT_SIZE || '2K',
     baseUrl: process.env.DOUBAO_BASE_URL || 'https://ark.cn-beijing.volces.com/api/v3/images/generations',
     // 单张估算费用（美元），仅用于额度展示，实际以火山方舟账单为准
     estCostUsdPerImage: parseFloat(process.env.DOUBAO_EST_COST || '0.01')

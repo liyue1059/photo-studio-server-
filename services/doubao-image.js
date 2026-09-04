@@ -159,7 +159,13 @@ async function generate(prompt, opts = {}) {
     throw new Error('DOUBAO_API_KEY 未配置，无法调用豆包图片生成（请在 server/.env 中填写）');
   }
 
-  const model = config.doubao.model || 'doubao-seedream-4-0-250828';
+  // editMode：老照片修复等「指令编辑」场景走 5.0-lite（见 config.doubao.editModel
+  // 的选型说明）。实测 seedream 4.0 img2img 重绘强度极低，会把划痕当场景内容
+  // 原样保留，无论提示词怎么写都删不掉损伤。
+  const editMode = !!opts.editMode;
+  const model = editMode
+    ? (config.doubao.editModel || 'doubao-seedream-5-0-lite-260128')
+    : (config.doubao.model || 'doubao-seedream-4-0-250828');
   const size = opts.size || '1024x1024';
   const n = Math.min(Math.max(parseInt(opts.n, 10) || 1, 1), 4);
   const inputImage = opts.image || null;
@@ -176,29 +182,36 @@ async function generate(prompt, opts = {}) {
     response_format: 'url'
   };
 
-  // ═══════════════════ 尺寸策略（优先级从高到低）════════════════════
-  //   1) 提示词显式指定比例（aspectRatio）→ 用户明确意图
-  //   2) 从上传图片真实像素推导（服务端解析）
-  //   3) 客户端回退比例（imageRatio）
-  //   4) 默认 1024x1024
-  let finalRatio = aspectRatio || null;
-  if (!finalRatio && inputImage) {
-    const derived = deriveRatioFromImage(inputImage);
-    if (derived) finalRatio = derived;
-  }
-  if (!finalRatio && imageRatio) {
-    finalRatio = imageRatio;
-  }
-  if (finalRatio) {
-    const resolved = resolveSize(finalRatio);
-    if (resolved) {
-      requestBody.size = resolved;
+  // editMode（5.0-lite）：不使用上面的像素尺寸推导。
+  // 5.0 系列只接受 '2K' / '3K' 档位，传 1024x1024 会 400 InvalidParameter；
+  // 比例由模型跟随输入图自动决定，因此这里固定走 config.doubao.editSize。
+  if (editMode) {
+    requestBody.size = config.doubao.editSize || '2K';
+  } else {
+    // ═══════════════════ 尺寸策略（优先级从高到低）════════════════════
+    //   1) 提示词显式指定比例（aspectRatio）→ 用户明确意图
+    //   2) 从上传图片真实像素推导（服务端解析）
+    //   3) 客户端回退比例（imageRatio）
+    //   4) 默认 1024x1024
+    let finalRatio = aspectRatio || null;
+    if (!finalRatio && inputImage) {
+      const derived = deriveRatioFromImage(inputImage);
+      if (derived) finalRatio = derived;
+    }
+    if (!finalRatio && imageRatio) {
+      finalRatio = imageRatio;
+    }
+    if (finalRatio) {
+      const resolved = resolveSize(finalRatio);
+      if (resolved) {
+        requestBody.size = resolved;
+      } else {
+        console.warn('[AI] ratio not mappable:', finalRatio, '-> fallback', size);
+        requestBody.size = size;
+      }
     } else {
-      console.warn('[AI] ratio not mappable:', finalRatio, '-> fallback', size);
       requestBody.size = size;
     }
-  } else {
-    requestBody.size = size;
   }
 
   // 图生图模式：附加输入图像
@@ -206,8 +219,10 @@ async function generate(prompt, opts = {}) {
     requestBody.image = inputImage;
   }
 
-  console.log('[AI] final size =', requestBody.size,
-    '(ratio=', finalRatio, ', explicit=', !!aspectRatio, ')');
+  console.log('[AI] mode =', editMode ? 'edit(repair)' : 'generate(seedream)',
+    '| model =', model,
+    '| size =', requestBody.size,
+    editMode ? '(fixed editSize)' : '(ratio-derived)');
 
   // ═══════════════════ 调用豆包 API ═══════════════════
   let resp;

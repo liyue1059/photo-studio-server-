@@ -12,36 +12,31 @@ const router = express.Router();
 router.use(authMiddleware);
 
 // ════════════════════════════════════════════════════════════════
-// 老照片修复提示词
+// 老照片修复提示词（中文，走 seedream 5.0-lite）
 //
-// 设计要点：老照片修复的目标是「还原」而不是「重新创作」。
-// 生成式模型天然倾向于 reimagine（重画）输入图，若不显式约束，
-// 用户上传的亲人旧照可能被改脸、改姿态、换背景——这是不可接受的。
-// 因此提示词用大量 negative / 保持性约束把模型锁在「只修复画质」的范围内。
+// 设计要点（2026-09-04 实测定版）：
+//   1) 修复目标是「还原」而不是「重新创作」，保真约束必须保留；
+//   2) 但旧版英文长 prompt（大段 Do NOT...）在 seedream 4.0 img2img 上
+//      实测会把划痕当场景内容原样保留——重绘强度天生极低，5 组提示词
+//      变体（英文长/短、中文、损伤重解释）全部删不掉划痕；
+//   3) 故改走 seedream 5.0-lite（见 config.doubao.editModel）——该模型指令
+//      遵循显著更强，且是本账号已开通模型里单价最低的；提示词改为中文短句、
+//      修复动作优先、保真约束收敛为一段。
 // ════════════════════════════════════════════════════════════════
 const REPAIR_PROMPT = [
-  'Restore this old, damaged photograph into a clean, high-quality modern photo.',
-  'STRICT PRESERVATION RULES (highest priority):',
-  '- Keep the EXACT same person, face, facial features, identity, expression, age and gaze.',
-  '- Keep the EXACT same pose, body, hands, clothing, hairstyle, objects, background and composition.',
-  '- Do NOT reimagine, restyle, beautify, slim, cartoonize, or change any content.',
-  '- Do NOT add or remove any person, object, text, watermark or decorative element.',
-  'RESTORATION TASKS:',
-  '- Remove film grain, noise, dust spots, scratches, creases, tears, water stains and foxing.',
-  '- Reconstruct missing or damaged areas plausibly and seamlessly.',
-  '- Sharpen blurred details, especially faces, eyes, hair and fabric texture.',
-  '- Correct faded, yellowed or washed-out color; restore natural realistic skin tones.',
-  '- Improve dynamic range and clarity while keeping the original mood and era.',
-  'OUTPUT: a sharp, clean, high-resolution photograph of the original moment, faithfully restored.'
+  '修复这张受损的老照片。图中所有白色划痕、折痕、裂纹、斑渍、霉斑和噪点都是照片的物理损伤，不是场景内容，必须彻底去除，并无缝重建被它们覆盖的皮肤、衣物和背景。',
+  '同时锐化模糊的面部、眼睛、发丝和衣物细节，恢复干净自然的影调与清晰度。',
+  '严格保持不变：人物的长相、五官、表情、年龄、姿势、服装、发型以及背景构图完全相同，不得重新创作，不得改变、增删画面中的任何内容。',
+  '输出：同一张照片的完好修复版——干净、清晰、高质量。'
 ].join('\n');
 
 // 黑白上色附加约束（仅当 options.colorize 为真时追加）
 const COLORIZE_SUFFIX = [
   '',
-  'ADDITIONAL: the input is a black-and-white / sepia photograph.',
-  '- Add natural, realistic, historically plausible color.',
-  '- Keep skin tones, lighting and materials believable; avoid oversaturated or neon colors.',
-  '- Everything else stays identical to the original.'
+  '补充：这张照片是黑白或泛黄的旧照片。',
+  '- 为其添加自然、真实、符合历史年代感的色彩。',
+  '- 肤色、光照和材质要真实可信，避免过饱和或荧光色。',
+  '- 其余内容保持与上述要求完全一致。'
 ].join('\n');
 
 const TASK_TTL = 3600; // 1 小时
@@ -80,8 +75,9 @@ async function processRepair(taskId, userId, image, imageUrl, options) {
     const prompt = options.colorize ? REPAIR_PROMPT + COLORIZE_SUFFIX : REPAIR_PROMPT;
 
     const result = await doubao.generate(prompt, {
-      // doubao-image 会根据 category 走默认分支；修复场景不属于 baby/pet，
-      // 传 'baby' 只是为了满足服务层的枚举，prompt 才是决定性的。
+      // 走 5.0-lite 修复模型（editMode）——seedream 4.0 img2img 实测删不掉划痕
+      editMode: true,
+      // 修复场景不属于 baby/pet，category 仅用于满足服务层枚举，prompt 才是决定性的
       category: 'baby',
       n: 1,
       image: inputImage
