@@ -115,6 +115,11 @@ app.get('/health', (req, res) => {
       doubaoApiKey: !!config.doubao.apiKey,
       doubaoKeyLen: len(config.doubao.apiKey),
       doubaoModel: config.doubao.model,
+      // 修复模型/尺寸单独暴露：老照片修复曾因 editModel 指向账号未上架的
+      // seededit（404）、以及 5.0 系列不接受 1K 尺寸（400）两次线上失败，
+      // 光看 doubaoModel 无法判断修复链路跑的是哪个模型。模型名非敏感信息。
+      doubaoEditModel: config.doubao.editModel,
+      doubaoEditSize: config.doubao.editSize,
       wxAppId: !!config.wechat.appId,
       wxPay: config.wxpay.enabled,
       cos: !!(config.cos.secretId && config.cos.secretKey && config.cos.bucket),
