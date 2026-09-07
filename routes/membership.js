@@ -79,6 +79,19 @@ router.get('/status', async (req, res) => {
           daysLeft,
           autoRenew: false
         };
+      } else {
+        // single 且 remain_count <= 0：额度已用完。务必如实返回 0，
+        // 不能回退到函数开头的兜底默认值 FREE_TRIALS（会显示成「剩余次数 2」），
+        // 否则首页亮着 2 次、修复却被 checkQuota 拦下，前后不一致。
+        membership = {
+          isVip: false,
+          remainCount: 0,
+          planType: 'single',
+          startDate: row.start_date,
+          endDate: row.end_date,
+          daysLeft,
+          autoRenew: false
+        };
       }
     }
 
