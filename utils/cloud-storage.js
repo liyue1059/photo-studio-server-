@@ -87,13 +87,20 @@ function getTcbApp() {
   try {
     // 懒加载：未安装 SDK 或未配置 envId 时绝不阻塞模块加载（回退到 COS/本地）。
     const tcb = require('@cloudbase/node-sdk');
-    // 2026-09-07 真机实测修复：云托管容器身份是「临时凭证三件套」
-    // （TENCENTCLOUD_SECRETID + TENCENTCLOUD_SECRETKEY + TENCENTCLOUD_SESSION_TOKEN）。
-    // 之前只让 SDK 自动探测，结果签名缺 sessionToken → secret id error / SIGN_PARAM_INVALID，
-    // 前端收到后回退本地增强 → 表现为「修复=原图」。这里显式透传三件套。
+    // 2026-09-07 真机实测修复：云托管容器身份是「临时凭证三件套」。
+    // 注意变量名坑：腾讯云容器注入的是 TENCENTCLOUD_SESSIONTOKEN（SESSION 与 TOKEN
+    // 之间无下划线，SCF/CloudBase Run 官方文档实锤），曾误写 SESSION_TOKEN 导致
+    // 拿不到 token → 签名缺 token → SIGN_PARAM_INVALID。两个名字都兼容。
     const secretId = config.cloudbase.secretId || process.env.TENCENTCLOUD_SECRETID;
     const secretKey = config.cloudbase.secretKey || process.env.TENCENTCLOUD_SECRETKEY;
-    const sessionToken = process.env.TENCENTCLOUD_SESSION_TOKEN;
+    const sessionToken =
+      process.env.TENCENTCLOUD_SESSIONTOKEN || process.env.TENCENTCLOUD_SESSION_TOKEN;
+    console.log(
+      '[cloud-storage] tcb init:',
+      'secretId?', !!secretId,
+      'sessionToken?', !!sessionToken,
+      'env=', envId
+    );
     _tcbApp = tcb.init({
       env: envId,
       // 显式传凭证时必须连 sessionToken 一起传（临时凭证签名必需）；
