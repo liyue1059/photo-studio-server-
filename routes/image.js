@@ -1,6 +1,7 @@
 const express = require('express');
 const db = require('../utils/db');
 const { authMiddleware } = require('../middleware/auth');
+const cloudStorage = require('../utils/cloud-storage');
 
 const router = express.Router();
 router.use(authMiddleware);
@@ -38,6 +39,26 @@ router.get('/list', async (req, res) => {
     params.push(safeLimit, offset);
 
     const rows = await db.query(sql, params);
+
+    // 若存的是 cloud:// fileID（callContainer 改造后首选），按需批量换为临时链接，
+    // 绕过临时链接过期——保证用户素材库长期可访问（根治「容器重启丢图」后半段）。
+    if (cloudStorage.cloudStorageEnabled()) {
+      const ids = [];
+      rows.forEach((r) => {
+        if (cloudStorage.isCloudFileId(r.origin_url)) ids.push(r.origin_url);
+        if (cloudStorage.isCloudFileId(r.result_url)) ids.push(r.result_url);
+      });
+      if (ids.length) {
+        const resolved = await cloudStorage.resolveStoredUrls(ids);
+        const map = {};
+        ids.forEach((id, i) => { map[id] = resolved[i]; });
+        rows.forEach((r) => {
+          if (map[r.origin_url]) r.origin_url = map[r.origin_url];
+          if (map[r.result_url]) r.result_url = map[r.result_url];
+        });
+      }
+    }
+
     res.json({ code: 0, data: { list: rows, page: safePage, limit: safeLimit } });
   } catch (err) {
     res.status(500).json({ code: 500, message: err.message });
@@ -47,20 +68,24 @@ router.get('/list', async (req, res) => {
 // Save image record
 router.post('/save', async (req, res) => {
   try {
-    const { originUrl, resultUrl, funcType } = req.body || {};
+    // 兼容两种来源：fileId（cloud://，永久，callContainer 改造后首选）或 URL（旧链路 / 临时链接）。
+    // 优先用 fileId；无则回退 URL。最终都落进 origin_url / result_url 列（列类型可存任一字符串）。
+    const { originUrl, resultUrl, originFileId, resultFileId, funcType } = req.body || {};
+    const origin = originFileId || originUrl;
+    const result = resultFileId || resultUrl;
     // 必填校验，避免插入 undefined / NULL 行
-    if (!originUrl || !resultUrl || !funcType) {
-      return res.status(400).json({ code: 400, message: 'originUrl、resultUrl、funcType 均为必填' });
+    if (!origin || !result || !funcType) {
+      return res.status(400).json({ code: 400, message: 'originUrl/originFileId、resultUrl/resultFileId、funcType 均为必填' });
     }
     // funcType 边界：限制为合法字符串，防止异常类型入库
     if (typeof funcType !== 'string' || funcType.length === 0 || funcType.length > 32) {
       return res.status(400).json({ code: 400, message: 'funcType 不合法' });
     }
-    const result = await db.query(
+    const row = await db.query(
       'INSERT INTO images (user_id, origin_url, result_url, func_type, created_at) VALUES (?, ?, ?, ?, NOW())',
-      [req.userId, originUrl, resultUrl, funcType]
+      [req.userId, origin, result, funcType]
     );
-    res.json({ code: 0, data: { id: result.insertId } });
+    res.json({ code: 0, data: { id: row.insertId } });
   } catch (err) {
     res.status(500).json({ code: 500, message: err.message });
   }

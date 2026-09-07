@@ -9,6 +9,7 @@
     "test": "jest"
   },
   "dependencies": {
+    "@cloudbase/node-sdk": "^3.7.0",
     "axios": "^1.6.0",
     "cos-nodejs-sdk-v5": "^2.14.0",
     "cors": "^2.8.5",

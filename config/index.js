@@ -68,6 +68,22 @@ const config = {
     cdnDomain: process.env.COS_CDN_DOMAIN
   },
 
+  // CloudBase 文件管理（云存储）——callContainer 改造的核心依赖。
+  // 配置了 CLOUDBASE_ENV_ID 后，所有图片（AI 生图 / 修复结果 / 用户上传）落云存储：
+  //   1) 容器重启 / 重新部署本地盘清空，云存储不丢（根治 P1「容器重启 AI 图全丢」）；
+  //   2) 返回的 tempFileURL 是 https 绝对地址，小程序 <image> 直接可用
+  //      （根治 P1「相对路径白图」）；
+  //   3) 前端先 wx.cloud.uploadFile 拿 fileID，再把 fileID 传给后端，
+  //      彻底绕开 callContainer 100KiB 请求体上限（repair/submit 的 500KB base64 痛点）。
+  // 未配置时 cloud-storage.js 回退 COS → 本地磁盘，旧链路不受影响。
+  // secretId/secretKey 可选：在云托管容器内运行时，SDK 可自动复用容器身份，
+  // 不填也能访问同环境的云存储；跨账号 / 本地联调才需要显式 AK。
+  cloudbase: {
+    envId: process.env.CLOUDBASE_ENV_ID,
+    secretId: process.env.CLOUDBASE_SECRET_ID,
+    secretKey: process.env.CLOUDBASE_SECRET_KEY
+  },
+
   ai: {
     serviceUrl: process.env.AI_SERVICE_URL,
     apiKey: process.env.AI_SERVICE_API_KEY

@@ -6,6 +6,7 @@ const redis = require('../utils/redis');
 const { authMiddleware } = require('../middleware/auth');
 const doubao = require('../services/doubao-image');
 const { toAbsoluteUrl } = require('../utils/url');
+const cloudStorage = require('../utils/cloud-storage');
 const { checkQuota, decrementQuota } = require('../utils/membership');
 
 const router = express.Router();
@@ -57,19 +58,34 @@ async function urlToDataURL(imageUrl) {
 }
 
 /**
+ * 把公网图片 URL 下载为 Buffer（用于把豆包返回的临时图转存进云存储，避免外链过期）。
+ */
+async function downloadUrlToBuffer(imageUrl) {
+  const dl = await axios.get(imageUrl, { responseType: 'arraybuffer', timeout: 30000 });
+  return Buffer.from(dl.data);
+}
+
+/**
  * 后台执行修复任务。成功/失败都写回 Redis，前端轮询取结果。
  * 注意：这里是 fire-and-forget，所有异常必须内部消化，不能抛到请求线程。
+ *
+ * @param {object} input { fileId?, image?(base64), imageUrl?, options? }
+ *   fileId —— callContainer 改造后的首选输入（前端 wx.cloud.uploadFile 拿到的 cloud:// ID），
+ *            体积极小，绕开 callContainer 100KiB 请求体上限。仍兼容旧 base64 / 公网 URL。
  */
-async function processRepair(taskId, userId, image, imageUrl, options) {
+async function processRepair(taskId, userId, input) {
+  const { fileId, image, imageUrl, options = {} } = input || {};
   const baseTask = { userId, createdAt: new Date().toISOString() };
   try {
-    // 优先用直传的 base64；只有给了 URL 才去回源下载
+    // 输入优先级：cloud:// fileId（下载转 data URL）→ 直传 base64 → 回源公网 URL
     let inputImage = image;
-    if (!inputImage && imageUrl) {
+    if (fileId) {
+      inputImage = await cloudStorage.resolveInputToDataUrl(fileId);
+    } else if (!inputImage && imageUrl) {
       inputImage = await urlToDataURL(imageUrl);
     }
     if (!inputImage) {
-      throw new Error('缺少输入图片（image 或 imageUrl 至少提供一个）');
+      throw new Error('缺少输入图片（fileId / image / imageUrl 至少提供一个）');
     }
 
     const prompt = options.colorize ? REPAIR_PROMPT + COLORIZE_SUFFIX : REPAIR_PROMPT;
@@ -83,9 +99,20 @@ async function processRepair(taskId, userId, image, imageUrl, options) {
       image: inputImage
     });
 
-    const resultUrl = result.images && result.images[0];
-    if (!resultUrl) {
+    const rawUrl = result.images && result.images[0];
+    if (!rawUrl) {
       throw new Error('AI 未返回修复结果');
+    }
+
+    // 结果图转存云存储（修复「容器重启丢图」+「相对路径白图」两个 P1）：
+    // 豆包返回的是其临时 URL，可能过期；落云存储后拿稳定可访问的 https 链接。
+    // 转存失败不致命——保留原始 URL 并打日志，前端仍可尝试直接展示。
+    let resultUrl = rawUrl;
+    try {
+      const buf = await downloadUrlToBuffer(rawUrl);
+      resultUrl = await cloudStorage.uploadImage(buf, cloudStorage.extFromUrl(rawUrl), 'repairs');
+    } catch (e) {
+      console.error('[Repair] 结果图转存云存储失败，回退原始 URL:', e && e.message);
     }
 
     // 修复成功 → 扣减 1 次免费额度；独立 try 避免扣减异常把「已成功」任务误标失败
@@ -122,18 +149,24 @@ async function processRepair(taskId, userId, image, imageUrl, options) {
 
 /**
  * POST /api/repair/submit
- * Body: { image?: string(base64 data URL), imageUrl?: string, options?: { colorize?: boolean } }
+ * Body: { fileId?: string(cloud://), image?: string(base64 data URL), imageUrl?: string,
+ *         options?: { colorize?: boolean } }
  * 返回 { taskId, status:'processing' }，前端再轮询 /api/repair/status。
  *
- * 设计说明：之所以不让前端先调 /api/upload 再提交，是为了省掉一次往返——
- * 老照片修复是一次性任务，图片不需要长期留存到用户素材库。
+ * 设计说明：
+ *   - fileId 为 callContainer 改造后的首选输入：前端先用 wx.cloud.uploadFile 把图传上云存储，
+ *     拿到极小的 cloud:// ID 再随请求体带给后端，绕开 callContainer 100KiB 请求体上限
+ *     （旧方案直接传 500KB base64 会被网关拒）。
+ *   - 仍兼容旧 base64 / 公网 URL 输入，便于过渡期双端不同步上线时不崩。
+ *   - 老照片修复是一次性任务，图片不长期留存用户素材库，故不让前端先调 /api/upload。
+ *   - submit 本身极快返回（AI 调用在 fire-and-forget 里跑），完全满足 callContainer 15s 超时。
  */
 router.post('/submit', async (req, res) => {
   try {
-    const { image, imageUrl, options = {} } = req.body || {};
+    const { fileId, image, imageUrl, options = {} } = req.body || {};
 
-    if (!image && !imageUrl) {
-      return res.status(400).json({ code: 400, message: 'image 或 imageUrl 至少提供一个' });
+    if (!fileId && !image && !imageUrl) {
+      return res.status(400).json({ code: 400, message: 'fileId、image、imageUrl 至少提供一个' });
     }
 
     // 免费额度校验：额度耗尽时拦截（会员不受影响）。扣减在 AI 修复成功后进行。
@@ -153,7 +186,7 @@ router.post('/submit', async (req, res) => {
       {
         userId: req.userId,
         status: 'processing',
-        hasImage: !!image,
+        hasImage: !!(fileId || image),
         imageUrl: imageUrl || null,
         options,
         createdAt: new Date().toISOString()
@@ -162,7 +195,7 @@ router.post('/submit', async (req, res) => {
     );
 
     // fire-and-forget：不 await，避免 HTTP 请求被 20~60s 的 AI 调用拖住
-    processRepair(taskId, req.userId, image, imageUrl, options);
+    processRepair(taskId, req.userId, { fileId, image, imageUrl, options });
 
     res.json({ code: 0, data: { taskId, status: 'processing' } });
   } catch (err) {

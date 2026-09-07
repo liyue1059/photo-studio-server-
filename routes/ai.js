@@ -3,6 +3,7 @@ const config = require('../config');
 const { optionalAuth } = require('../middleware/auth');
 const doubao = require('../services/doubao-image');
 const { toAbsoluteUrls } = require('../utils/url');
+const cloudStorage = require('../utils/cloud-storage');
 const { checkQuota, decrementQuota } = require('../utils/membership');
 
 const router = express.Router();
@@ -10,14 +11,22 @@ router.use(optionalAuth);
 
 /**
  * POST /api/ai/generate
- * Body: { prompt: string, category?: 'baby'|'pet', n?: number, size?: string, image?: string, aspectRatio?: string }
- *   image — 可选，base64 data URL (data:image/jpeg;base64,...) 或公网图片 URL。
- *         传入时执行图生图（img2img）：基于该参考图 + prompt 生成新图。
+ * Body: { prompt: string, category?: 'baby'|'pet', n?: number, size?: string,
+ *         image?: string, fileId?: string(cloud://), aspectRatio?: string }
+ *   image — 可选，base64 data URL (data:image/jpeg;base64,...) 或公网图片 URL（旧链路）。
+ *   fileId — 可选，callContainer 改造后的首选图生图输入：前端 wx.cloud.uploadFile 拿到的
+ *            cloud:// ID，体积极小，绕开 callContainer 100KiB 请求体上限。优先于 image。
+ *         传入 image/fileId 时执行图生图（img2img）：基于该参考图 + prompt 生成新图。
  *         不传时退化为纯文生图。
  *   aspectRatio — 可选，原图宽高比（如 "3:4"）。图生图时用于保持原图比例，避免被裁切为 1:1。
  * Returns: { code:0, data:{ prompt, images:[绝对 URL], model, costUsd }, message }
  *   images 一律是绝对 https URL（未配置 COS 时由 utils/url.js 把本地相对路径补全），
  *   禁止返回 /ai-generated/xxx.png 这类相对路径——小程序 <image> 会静默白图。
+ *
+ * ⚠️ 同步超时注意（callContainer 改造）：本接口在 HTTP 请求内同步 await 豆包（30~90s），
+ *   而 wx.cloud.callContainer 的 timeout 上限仅 15000ms —— 直接走 callContainer 会被网关掐断。
+ *   生产要跑通 AI 生图，需把本接口改成「submit → 轮询」异步任务模式（与 repair 一致），
+ *   或保留一条更长超时的非 callContainer 通道。详见 09-07 改造记录，待前端服务名确认后实施。
  */
 router.post('/generate', async (req, res) => {
   try {
@@ -27,14 +36,21 @@ router.post('/generate', async (req, res) => {
       return res.status(400).json({ code: 400, message: '缺少 prompt 描述文字' });
     }
 
+    // 图生图输入：fileId（cloud://）优先，落云存储后下载转 data URL；否则用旧 base64 / 公网 URL。
+    let inputImage = body.image || null;
+    if (body.fileId) {
+      inputImage = await cloudStorage.resolveInputToDataUrl(body.fileId);
+    }
+
     // 日志：记录关键参数便于排查（不打印完整 base64）
-    const hasImage = !!(body.image && body.image.length > 50);
+    const hasImage = !!(inputImage && inputImage.length > 50);
     // 生产环境脱敏：不打印用户 prompt 原文，仅记录结构化元信息，避免个人信息落日志
     if (config.env === 'production') {
       console.log('[AI] Request:', {
         category: body.category,
         n: body.n,
         hasImage,
+        hasFileId: !!body.fileId,
         aspectRatio: body.aspectRatio
       });
     } else {
@@ -44,8 +60,8 @@ router.post('/generate', async (req, res) => {
         n: body.n,
         aspectRatio: body.aspectRatio,
         imageRatio: body.imageRatio,
-        imageSize: hasImage ? body.image.length + ' chars' : 'none',
-        imagePrefix: hasImage ? body.image.slice(0, 30) + '...' : null
+        imageSize: hasImage ? inputImage.length + ' chars' : 'none',
+        imagePrefix: hasImage ? inputImage.slice(0, 30) + '...' : null
       });
     }
 
@@ -54,7 +70,7 @@ router.post('/generate', async (req, res) => {
       category: body.category || 'baby',
       n: Math.min(4, Math.max(1, parseInt(body.n) || (hasImage ? 1 : 2))),
       size: body.size || '1024x1024',
-      image: body.image || null,
+      image: inputImage,
       aspectRatio: body.aspectRatio || null,
       imageRatio: body.imageRatio || null
     };

@@ -123,6 +123,8 @@ app.get('/health', (req, res) => {
       wxAppId: !!config.wechat.appId,
       wxPay: config.wxpay.enabled,
       cos: !!(config.cos.secretId && config.cos.secretKey && config.cos.bucket),
+      // callContainer 改造核心：配置了 CLOUDBASE_ENV_ID 即走云存储（根治容器重启丢图 + 白图）
+      cloudbase: !!config.cloudbase.envId,
       dbName: config.db.database,
       jwtSecret: !!process.env.JWT_SECRET
     }
