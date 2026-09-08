@@ -13,6 +13,7 @@
  *      （UPDATE ... WHERE pay_status <> 'paid' 抢占，抢不到就跳过发放，杜绝重复发权益）。
  */
 const express = require('express');
+const crypto = require('crypto');
 const config = require('../config');
 const db = require('../utils/db');
 const redis = require('../utils/redis');
@@ -23,6 +24,24 @@ const vpay = require('../utils/vpay');
 const router = express.Router();
 
 const VALID_PAY_TYPES = ['single', 'trial', 'monthly', 'quarter', 'halfYear', 'yearly'];
+
+// mp后台「消息推送」URL 配置时的开通验证（GET，微信服务器校验服务器持有同一 Token）。
+// Token = 云托管环境变量 VPAY_NOTIFY_TOKEN，须与 mp后台消息推送配置里的 Token 完全一致。
+router.get('/notify', (req, res) => {
+  const token = process.env.VPAY_NOTIFY_TOKEN || '';
+  const { signature, timestamp, nonce, echostr } = req.query;
+  if (!token || !signature || !echostr) {
+    return res.status(500).send('notify token not configured');
+  }
+  const expected = crypto
+    .createHash('sha1')
+    .update([token, timestamp, nonce].sort().join(''))
+    .digest('hex');
+  if (signature === expected) {
+    return res.send(echostr);
+  }
+  return res.status(403).send('signature mismatch');
+});
 
 const NOTIFY_OK = '<xml><ErrCode>0</ErrCode><ErrMsg><![CDATA[success]]></ErrMsg></xml>';
 const NOTIFY_RETRY = '<xml><ErrCode>1</ErrCode><ErrMsg><![CDATA[retry]]></ErrMsg></xml>';
