@@ -95,12 +95,15 @@ function getTcbApp() {
     const secretKey = config.cloudbase.secretKey || process.env.TENCENTCLOUD_SECRETKEY;
     const sessionToken =
       process.env.TENCENTCLOUD_SESSIONTOKEN || process.env.TENCENTCLOUD_SESSION_TOKEN;
-    console.log(
-      '[cloud-storage] tcb init:',
-      'secretId?', !!secretId,
-      'sessionToken?', !!sessionToken,
-      'env=', envId
-    );
+    // 正常情况不刷屏；只在凭证不齐（会回退/失败）时告警，方便线上排障。
+    if (!secretId || !sessionToken) {
+      console.warn(
+        '[cloud-storage] tcb init:',
+        'secretId?', !!secretId,
+        'sessionToken?', !!sessionToken,
+        'env=', envId
+      );
+    }
     _tcbApp = tcb.init({
       env: envId,
       // 显式传凭证时必须连 sessionToken 一起传（临时凭证签名必需）；
