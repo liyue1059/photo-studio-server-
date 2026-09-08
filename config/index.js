@@ -120,6 +120,28 @@ const config = {
     yearly: 11990       // ¥119.9 包年（12 个月）
   },
 
+  // ── 虚拟支付（微信小程序虚拟支付，数字商品合规链路；2026-09-08 接入）──
+  // 开通：mp后台「支付与交易 → 虚拟支付」；开通后把 OfferID/AppKey 填进云托管环境变量：
+  //   VPAY_OFFER_ID / VPAY_APP_KEY（AppKey 是支付密钥，勿提交 git、勿外发）。
+  // 未配置时 enabled() 为 false，/api/vpay/order 返回 {enabled:false}，前端自动回退旧支付链路。
+  vpay: {
+    offerId: process.env.VPAY_OFFER_ID || '',
+    appKey: process.env.VPAY_APP_KEY || '',
+    // 道具 ID 映射：后台「道具管理」创建的 productId。默认与 payType 同名；
+    // 后台若用了别的 ID，用环境变量覆盖：VPAY_PID_SINGLE/_TRIAL/_MONTHLY/_QUARTER/_HALFYEAR/_YEARLY
+    productIds: {
+      single: process.env.VPAY_PID_SINGLE || 'single',
+      trial: process.env.VPAY_PID_TRIAL || 'trial',
+      monthly: process.env.VPAY_PID_MONTHLY || 'monthly',
+      quarter: process.env.VPAY_PID_QUARTER || 'quarter',
+      halfYear: process.env.VPAY_PID_HALFYEAR || 'halfyear',
+      yearly: process.env.VPAY_PID_YEARLY || 'yearly'
+    },
+    enabled() {
+      return !!(this.offerId && this.appKey);
+    }
+  },
+
   // 会员权益：新用户免费试用次数。
   // 与 miniprogram/config/brand.js 的 `freeTrials` 保持一致（品牌侧是展示用常量，
   // 这里是服务端真正消费的唯一真相源）。改数量只需改这一处 + brand.js 同步。

@@ -75,6 +75,12 @@ router.post('/login', async (req, res) => {
       { expiresIn: config.jwt.expiresIn }
     );
 
+    // 虚拟支付用户态签名需要 sessionKey：登录时顺手存 Redis（30 天 TTL）。
+    // 丢失时 /api/vpay/order 返回 401，前端自动重登（重新走本接口）刷新。
+    if (wxRes.data.session_key) {
+      await redis.set('vpay_sessionkey:' + userId, wxRes.data.session_key, 30 * 86400);
+    }
+
     // Get user profile
     const profile = await db.query(
       'SELECT id, openid, nickname, avatar_url, phone, created_at FROM users WHERE id = ?',

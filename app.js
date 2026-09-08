@@ -15,6 +15,7 @@ const repairRoutes = require('./routes/repair');
 const membershipRoutes = require('./routes/membership');
 const uploadRoutes = require('./routes/upload');
 const payRoutes = require('./routes/pay');
+const vpayRoutes = require('./routes/vpay');
 const aiRoutes = require('./routes/ai');
 const adRoutes = require('./routes/ad');
 
@@ -140,6 +141,7 @@ app.use('/api/repair', repairRoutes);
 app.use('/api/membership', membershipRoutes);
 app.use('/api/upload', uploadRoutes);
 app.use('/api/pay', payRoutes);
+app.use('/api/vpay', vpayRoutes);
 app.use('/api/ai', aiRoutes);
 app.use('/api/ad', adRoutes);
 
